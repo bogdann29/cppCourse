@@ -29,7 +29,6 @@ bool is_Integer(const std::string &s, int64_t &target)
     }
     catch (const std::exception &ex)
     {
-        std::cout << "ERROR: Exception occurred during value casting " << ex.what() << std::endl;
         throw ex;
     }
 
@@ -64,43 +63,41 @@ std::pair<PyObject *, PyObject *> build_KeyValue_Object(std::string_view kv_str)
     auto delimiter_it = std::find(kv_str.begin(), kv_str.end(), ':');
     if (delimiter_it == kv_str.end())
     {
-        std::cout << "ERROR: Invalid string format (invalid delimiter)" << std::endl;
+        PyErr_Format(PyExc_ValueError, "ERROR: Invalid string format (invalid delimiter)");
         return {NULL, NULL};
     }
 
     std::string_view key_str = parse_Quotes(std::string_view(kv_str.begin(), delimiter_it));
-    std::cout << "key_str = " << key_str << std::endl;
     int64_t posible_val = 0;
     try
     {
         if (is_Integer(std::string(std::next(delimiter_it), kv_str.end()), posible_val))
         {
-            std::cout << "posible_val = " << posible_val << std::endl;
             if (!(value = Py_BuildValue("i", posible_val)))
             {
-                std::cout << "ERROR: Failed to build integer value" << std::endl;
+                PyErr_Format(PyExc_ValueError, "ERROR: Failed to build integer value");
                 return {NULL, NULL};
             }
         }
         else
         {
             std::string_view value_str = parse_Quotes(std::string_view(std::next(delimiter_it), kv_str.end()));
-            std::cout << "value_str = " << value_str << std::endl;
-            if (!(value = Py_BuildValue("s", value_str)))
+            if (!(value = Py_BuildValue("s", std::string(value_str).c_str())))
             {
-                std::cout << "ERROR: Failed to build string value" << std::endl;
+                PyErr_Format(PyExc_ValueError, "ERROR: Failed to build string value");
                 return {NULL, NULL};
             }
         }
     }
     catch (std::exception &ex)
     {
+        PyErr_Format(PyExc_ValueError, "ERROR: Exception occurred during value casting %s", ex.what());
         return {NULL, NULL};
     }
 
-    if (!(key = Py_BuildValue("s", key_str)))
+    if (!(key = Py_BuildValue("s", std::string(key_str).c_str())))
     {
-        std::cout << "ERROR: Failed to build string value" << std::endl;
+        PyErr_Format(PyExc_ValueError, "ERROR: Failed to build string value");
         return {NULL, NULL};
     }
 
@@ -112,7 +109,7 @@ static PyObject *loads(PyObject *self, PyObject *args)
     PyObject *dict = NULL;
     if (!(dict = PyDict_New()))
     {
-        std::cout << "ERROR: Failed to create Dict Object" << std::endl;
+        PyErr_Format(PyExc_TypeError, "ERROR: Failed to create Dict Object");
         return NULL;
     }
 
@@ -124,7 +121,7 @@ static PyObject *loads(PyObject *self, PyObject *args)
 
     if (!dump_s.empty() && (dump_s.back() != '}' || dump_s.front() != '{'))
     {
-        std::cout << "ERROR: Incorrect json serialization (must be wrapped in curly braces)" << std::endl;
+        PyErr_Format(PyExc_ValueError, "ERROR: Incorrect json serialization (must be wrapped in curly braces)");
         return NULL;
     }
 
@@ -143,7 +140,7 @@ static PyObject *loads(PyObject *self, PyObject *args)
                 return NULL;
             if (PyDict_SetItem(dict, key, value) < 0)
             {
-                std::cout << "ERROR: Failed to set item" << std::endl;
+                PyErr_Format(PyExc_TypeError, "ERROR: Failed to set item");
                 return NULL;
             }
             kv_block_start = std::next(it);
@@ -156,17 +153,85 @@ static PyObject *loads(PyObject *self, PyObject *args)
         return NULL;
     if (PyDict_SetItem(dict, key, value) < 0)
     {
-        std::cout << "ERROR: Failed to set item" << std::endl;
+        PyErr_Format(PyExc_TypeError, "ERROR: Failed to set item");
         return NULL;
     }
     return dict;
 }
 
-int main()
+static PyObject *dumps(PyObject *self, PyObject *args)
 {
-    // std::string block = "\"hello\": 10";
-    // std::string block1 = "\"world\": \"value\"";
+    PyObject *res = NULL;
+    PyObject *json_dict;
 
-    // auto p = build_KeyValue_Object(block);
-    // p = build_KeyValue_Object(block1);
+    if (!PyArg_ParseTuple(args, "O", &json_dict))
+        return NULL;
+
+    if (!PyDict_Check(json_dict))
+    {
+        PyErr_Format(PyExc_TypeError, "ERROR: Argument must be a dictionary");
+        return NULL;
+    }
+
+    std::string res_str = "{";
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+    std::string value_str;
+    bool first_item = true;
+
+    while (PyDict_Next(json_dict, &pos, &key, &value))
+    {
+        PyObject *key_pystr = PyObject_Str(key);
+        if (!key_pystr)
+        {
+            PyErr_Format(PyExc_TypeError, "Key must be convertible to string");
+            return NULL;
+        }
+        PyObject *value_pystr = PyObject_Str(value);
+        if (!value_pystr)
+        {
+            PyErr_Format(PyExc_TypeError, "Value must be convertible to string");
+            return NULL;
+        }
+
+        const char *key_str = PyUnicode_AsUTF8(key_pystr);
+        const char *value_str = PyUnicode_AsUTF8(value_pystr);
+
+        if (!first_item)
+        {
+            res_str += ", ";
+        }
+
+        if (PyLong_Check(value))
+            res_str += "\"" + std::string(key_str) + "\": " + std::string(value_str);
+        else
+            res_str += "\"" + std::string(key_str) + "\": \"" + std::string(value_str) + "\"";
+
+        first_item = false;
+    }
+    res_str += "}";
+
+    if (!(res = Py_BuildValue("s", res_str.c_str())))
+    {
+        PyErr_Format(PyExc_ValueError, "ERROR: Failed to build string value");
+        return NULL;
+    }
+    return res;
+}
+
+static PyMethodDef cjsonMethods[] = {
+    {"loads", loads, METH_VARARGS, "Формирование словаря по строке в формате json"},
+    {"dumps", dumps, METH_VARARGS, "Сериализация json словаря в строку"},
+    {NULL, NULL, 0, NULL}};
+
+static PyModuleDef cjsonModuleDef = {
+    PyModuleDef_HEAD_INIT,
+    "cjson",
+    "Модуль cjson",
+    -1,
+    cjsonMethods};
+
+PyMODINIT_FUNC PyInit_cjson(void)
+{
+    return PyModule_Create(&cjsonModuleDef);
 }
