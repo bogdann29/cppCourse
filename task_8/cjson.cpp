@@ -6,12 +6,13 @@
 #include <iterator>
 #include <exception>
 #include <iostream>
+#include <optional>
 
 bool is_Integer(const std::string &s, int64_t &target)
 {
     auto it = s.rbegin();
     for (; it != s.rend(); ++it)
-        if (!(*it == ' ' || *it == '\t' || *it == '\n'))
+        if (!std::isspace(static_cast<unsigned char>(*it)))
             break;
 
     auto ln = static_cast<size_t>(s.rend() - it);
@@ -35,21 +36,24 @@ bool is_Integer(const std::string &s, int64_t &target)
     return true;
 }
 
-std::string_view parse_Quotes(std::string_view str)
+std::optional<std::string_view> parse_Quotes(std::string_view str)
 {
     auto is_quote = [](char c)
     { return c == '\"'; };
 
+    auto is_not_space = [](char c)
+    { return !std::isspace(static_cast<unsigned char>(c)); };
+
     auto first_quote = std::find_if(str.begin(), str.end(), is_quote);
-    if (first_quote == str.end())
+    if (first_quote == str.end() || std::find_if(str.begin(), first_quote, is_not_space) != first_quote)
     {
-        return {};
+        return std::nullopt;
     }
 
     auto second_quote = std::find_if(first_quote + 1, str.end(), is_quote);
-    if (second_quote == str.end())
+    if (second_quote == str.end() || std::find_if(second_quote + 1, str.end(), is_not_space) != str.end())
     {
-        return {};
+        return std::nullopt;
     }
 
     return std::string_view(std::next(first_quote), second_quote);
@@ -59,7 +63,6 @@ std::string_view parse_Quotes(std::string_view str)
 std::pair<PyObject *, PyObject *> build_KeyValue_Object(std::string_view kv_str)
 {
     PyObject *key, *value;
-
     auto delimiter_it = std::find(kv_str.begin(), kv_str.end(), ':');
     if (delimiter_it == kv_str.end())
     {
@@ -67,13 +70,20 @@ std::pair<PyObject *, PyObject *> build_KeyValue_Object(std::string_view kv_str)
         return {NULL, NULL};
     }
 
-    std::string_view key_str = parse_Quotes(std::string_view(kv_str.begin(), delimiter_it));
+    auto key_str = parse_Quotes(std::string_view(kv_str.begin(), delimiter_it));
+    // std::cout << *key_str << std::endl;
+    if (!key_str)
+    {
+        PyErr_Format(PyExc_ValueError, "ERROR: The key must be a string and not contain extra characters");
+        return {NULL, NULL};
+    }
+
     int64_t posible_val = 0;
     try
     {
         if (is_Integer(std::string(std::next(delimiter_it), kv_str.end()), posible_val))
         {
-            if (!(value = Py_BuildValue("i", posible_val)))
+            if (!(value = Py_BuildValue("l", posible_val)))
             {
                 PyErr_Format(PyExc_ValueError, "ERROR: Failed to build integer value");
                 return {NULL, NULL};
@@ -81,8 +91,14 @@ std::pair<PyObject *, PyObject *> build_KeyValue_Object(std::string_view kv_str)
         }
         else
         {
-            std::string_view value_str = parse_Quotes(std::string_view(std::next(delimiter_it), kv_str.end()));
-            if (!(value = Py_BuildValue("s", std::string(value_str).c_str())))
+            auto value_str = parse_Quotes(std::string_view(std::next(delimiter_it), kv_str.end()));
+            if (!value_str)
+            {
+                PyErr_Format(PyExc_ValueError, "ERROR: The value must be a string and not contain extra characters");
+                return {NULL, NULL};
+            }
+
+            if (!(value = Py_BuildValue("s", std::string(*value_str).c_str())))
             {
                 PyErr_Format(PyExc_ValueError, "ERROR: Failed to build string value");
                 return {NULL, NULL};
@@ -95,7 +111,7 @@ std::pair<PyObject *, PyObject *> build_KeyValue_Object(std::string_view kv_str)
         return {NULL, NULL};
     }
 
-    if (!(key = Py_BuildValue("s", std::string(key_str).c_str())))
+    if (!(key = Py_BuildValue("s", std::string(*key_str).c_str())))
     {
         PyErr_Format(PyExc_ValueError, "ERROR: Failed to build string value");
         return {NULL, NULL};
@@ -119,11 +135,23 @@ static PyObject *loads(PyObject *self, PyObject *args)
 
     std::string dump_s(json_dump);
 
-    if (!dump_s.empty() && (dump_s.back() != '}' || dump_s.front() != '{'))
+    if (dump_s.empty())
+    {
+        PyErr_Format(PyExc_ValueError, "ERROR: empty string is not a json object");
+        return NULL;
+    }
+
+    if (dump_s.back() != '}' || dump_s.front() != '{')
     {
         PyErr_Format(PyExc_ValueError, "ERROR: Incorrect json serialization (must be wrapped in curly braces)");
         return NULL;
     }
+
+    // Проверка на пустой json
+    auto is_not_space = [](char c)
+    { return !std::isspace(static_cast<unsigned char>(c)); };
+    if (std::find_if(std::next(dump_s.begin()), std::prev(dump_s.end()), is_not_space) == std::prev(dump_s.end()))
+        return dict;
 
     // {"hello": 10, "world": "value"}
     auto it = std::next(dump_s.begin());
@@ -147,7 +175,6 @@ static PyObject *loads(PyObject *self, PyObject *args)
         }
         ++it;
     }
-
     auto [key, value] = build_KeyValue_Object(std::string_view(kv_block_start, it));
     if (key == NULL && value == NULL)
         return NULL;

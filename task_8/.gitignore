@@ -1,1 +1,8 @@
 build
+*.so
+.pytest_cache
+*.egg-info
+dist
+tests/__pycache__
+dataset
+*.json
