@@ -38,25 +38,18 @@ bool is_Integer(const std::string &s, int64_t &target)
 
 std::optional<std::string_view> parse_Quotes(std::string_view str)
 {
-    auto is_quote = [](char c)
-    { return c == '\"'; };
-
     auto is_not_space = [](char c)
     { return !std::isspace(static_cast<unsigned char>(c)); };
 
-    auto first_quote = std::find_if(str.begin(), str.end(), is_quote);
-    if (first_quote == str.end() || std::find_if(str.begin(), first_quote, is_not_space) != first_quote)
-    {
+    size_t first = str.find('\"');
+    if (first == std::string_view::npos || std::find_if(str.begin(), str.begin() + first, is_not_space) != str.begin() + first)
         return std::nullopt;
-    }
 
-    auto second_quote = std::find_if(first_quote + 1, str.end(), is_quote);
-    if (second_quote == str.end() || std::find_if(second_quote + 1, str.end(), is_not_space) != str.end())
-    {
+    size_t second = str.find('\"', first + 1);
+    if (second == std::string_view::npos || std::find_if(str.begin() + second + 1, str.end(), is_not_space) != str.end())
         return std::nullopt;
-    }
 
-    return std::string_view(std::next(first_quote), second_quote);
+    return str.substr(first + 1, second - first - 1);
 }
 
 // ' "world": "value" '  possible string
@@ -98,7 +91,7 @@ std::pair<PyObject *, PyObject *> build_KeyValue_Object(std::string_view kv_str)
                 return {NULL, NULL};
             }
 
-            if (!(value = Py_BuildValue("s", std::string(*value_str).c_str())))
+            if (!(value = PyUnicode_FromStringAndSize(value_str->data(), value_str->size())))
             {
                 PyErr_Format(PyExc_ValueError, "ERROR: Failed to build string value");
                 return {NULL, NULL};
@@ -111,7 +104,7 @@ std::pair<PyObject *, PyObject *> build_KeyValue_Object(std::string_view kv_str)
         return {NULL, NULL};
     }
 
-    if (!(key = Py_BuildValue("s", std::string(*key_str).c_str())))
+    if (!(key = PyUnicode_FromStringAndSize(key_str->data(), key_str->size())))
     {
         PyErr_Format(PyExc_ValueError, "ERROR: Failed to build string value");
         return {NULL, NULL};

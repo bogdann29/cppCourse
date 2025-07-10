@@ -4,5 +4,4 @@ build
 *.egg-info
 dist
 tests/__pycache__
-dataset
 *.json

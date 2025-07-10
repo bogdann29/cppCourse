@@ -47,6 +47,7 @@ add_custom_target(
     DEPENDS ${PYTHON_SITEPACKAGES}/${MODULE_NAME}
 )
 
+
 option(BUILD_TESTING "Build tests" ON)
 
 if(BUILD_TESTING)
@@ -61,7 +62,7 @@ if(BUILD_TESTING)
             COMMAND ${Python_EXECUTABLE} -m pip install pytest
             RESULT_VARIABLE PYTEST_INSTALL_RESULT
         )
-        
+
         if(NOT PYTEST_INSTALL_RESULT EQUAL 0)
             message(WARNING "Failed to install pytest, tests will be disabled")
             set(PYTEST_FOUND 1)
@@ -76,7 +77,7 @@ if(BUILD_TESTING)
             COMMAND ${Python_EXECUTABLE} -m pytest tests/
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         )
-        
+
         add_custom_target(
             test
             COMMAND ${Python_EXECUTABLE} -m pytest -v tests/
@@ -86,4 +87,68 @@ if(BUILD_TESTING)
     else()
         message(WARNING "pytest not found, tests will be disabled")
     endif()
+
+    option(BUILD_BENCHMARKS "Build benchmarks" ON)
+
+    if(BUILD_BENCHMARKS)
+
+        execute_process(
+            COMMAND ${Python_EXECUTABLE} -c "import ujson"
+            RESULT_VARIABLE UJSON_FOUND
+        )
+
+        if(NOT UJSON_FOUND EQUAL 0)
+            message(STATUS "Installing ujson for benchmarks")
+            execute_process(
+                COMMAND ${Python_EXECUTABLE} -m pip install ujson
+                RESULT_VARIABLE UJSON_INSTALL_RESULT
+            )
+
+            if(NOT UJSON_INSTALL_RESULT EQUAL 0)
+                message(WARNING "Failed to install ujson, benchmarks will be disabled")
+                set(UJSON_FOUND 1)
+            else()
+                set(UJSON_FOUND 0)
+            endif()
+        endif()
+
+        if(NOT FAKER_FOUND EQUAL 0)
+            message(STATUS "Installing Faker for test data generation")
+            execute_process(
+                COMMAND ${Python_EXECUTABLE} -m pip install faker
+                RESULT_VARIABLE FAKER_INSTALL_RESULT
+            )
+
+            if(NOT FAKER_INSTALL_RESULT EQUAL 0)
+                message(WARNING "Failed to install Faker, will use simple random data")
+                set(FAKER_FOUND 1)
+            else()
+                set(FAKER_FOUND 0)
+            endif()
+        endif()
+
+        if(UJSON_FOUND EQUAL 0)
+            file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/dataset)
+
+            add_custom_target(
+                benchmark
+                COMMAND ${Python_EXECUTABLE} -m pytest tests/benchmark.py -v -s
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                DEPENDS install_module
+                COMMENT "Running performance benchmarks"
+            )
+
+            # add_custom_target(
+            #     generate_data
+            #     COMMAND ${Python_EXECUTABLE} -c
+            #     "import sys; sys.path.append('${CMAKE_CURRENT_SOURCE_DIR}/tests');
+            #     from generate_data import generate_test_files;
+            #     generate_test_files('${CMAKE_CURRENT_SOURCE_DIR}/dataset', 
+            #     num_entries=1000000, num_files=5)"
+            #     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+            #     COMMENT "Generating test data files in dataset directory"
+            # )
+        endif()
+    endif()
+
 endif()

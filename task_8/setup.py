@@ -8,7 +8,11 @@ def main():
         description="cjson module",
         author="Pustov B.S.",
         ext_modules=[
-            Extension("cjson", ["cjson.cpp"], extra_compile_args=["-std=c++20"])
+            Extension(
+                "cjson",
+                ["cjson.cpp"],
+                extra_compile_args=["-std=c++20", "-O3", "-march=native"],
+            )
         ],
     )
 
